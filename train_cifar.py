@@ -1,6 +1,7 @@
 import os
 import pickle
 
+import numpy as np
 import torch
 from sklearn.mixture import GaussianMixture
 
@@ -59,7 +60,7 @@ def eval_train(model, eval_loader, CE, all_loss, epoch, net, device, r, stats_lo
     return prob, all_loss, losses_clean
 
 
-def test(epoch, net1, net2, test_loader, device, test_log):
+def run_test(epoch, net1, net2, test_loader, device, test_log):
     net1.eval()
     net2.eval()
     correct = 0
@@ -100,7 +101,9 @@ def run_train_loop(net1, optimizer1, sched1, net2, optimizer2, sched2, criterion
                                                            stats_log)
             prob2, all_loss[1], losses_clean2 = eval_train(net2, eval_loader, CE, all_loss[1], epoch, 2, device, r,
                                                            stats_log)
-            pred2 = prob2 > p_threshold
+
+            p_thr2 = np.clip(p_threshold, prob2.min() + 1e-5, prob2.max() - 1e-5)
+            pred2 = prob2 > p_thr2
 
             loss_log.write('{},{},{},{},{}\n'.format(epoch, losses_clean2[pred2].mean(), losses_clean2[pred2].std(),
                                                      losses_clean2[~pred2].mean(), losses_clean2[~pred2].std()))
@@ -111,7 +114,9 @@ def run_train_loop(net1, optimizer1, sched1, net2, optimizer2, sched2, criterion
             prob2, all_loss[1], losses_clean2 = eval_train(net2, eval_loader, CE, all_loss[1], epoch, 2, device, r,
                                                            stats_log)
 
-            pred2 = (prob2 > p_threshold)
+            p_thr2 = np.clip(p_threshold, prob2.min() + 1e-5, prob2.max() - 1e-5)
+            pred2 = prob2 > p_thr2
+
             loss_log.write('{},{},{},{},{}\n'.format(epoch, losses_clean2[pred2].mean(), losses_clean2[pred2].std(),
                                                      losses_clean2[~pred2].mean(), losses_clean2[~pred2].std()))
             loss_log.flush()
@@ -123,13 +128,15 @@ def run_train_loop(net1, optimizer1, sched1, net2, optimizer2, sched2, criterion
             print('\nTrain Net2')
             prob1, all_loss[0], losses_clean1 = eval_train(net1, eval_loader, CE, all_loss[0], epoch, 1, device, r,
                                                            stats_log)
-            pred1 = (prob1 > p_threshold)
+
+            p_thr1 = np.clip(p_threshold, prob1.min() + 1e-5, prob1.max() - 1e-5)
+            pred1 = prob1 > p_thr1
 
             labeled_trainloader, unlabeled_trainloader = loader.run('train', pred1, prob1)  # co-divide
             train(epoch, net2, net1, criterion, optimizer2, labeled_trainloader, unlabeled_trainloader, lambda_u,
                   batch_size, num_class, device, T, alpha, warm_up, dataset, r, noise_mode, num_epochs)  # train net2
 
-        test(epoch, net1, net2, test_loader, device, test_log)
+        run_test(epoch, net1, net2, test_loader, device, test_log)
 
         sched1.step()
         sched2.step()

@@ -49,7 +49,7 @@ def parse_args():
     return args
 
 
-def val(net, val_loader, best_acc, k,exp_id, experiment_name):
+def val(net, val_loader, best_acc, k, exp_id, experiment_name):
     net.eval()
     correct = 0
     total = 0
@@ -71,7 +71,7 @@ def val(net, val_loader, best_acc, k,exp_id, experiment_name):
     return acc
 
 
-def test(net1, net2, test_loader):
+def run_test(net1, net2, test_loader):
     net1.eval()
     net2.eval()
     correct = 0
@@ -98,7 +98,7 @@ def eval_train(epoch, model, eval_loader, criterion, num_batches, batch_size, st
     paths = []
     n = 0
     with torch.no_grad():
-        for batch_idx, (inputs, _, targets, path, _) in enumerate(eval_loader):
+        for batch_idx, (inputs, _, targets, clean_target, path, _) in enumerate(eval_loader):
             inputs, targets = inputs.cuda(), targets.cuda()
             outputs = model(inputs)
             loss = criterion(outputs, targets)
@@ -110,10 +110,12 @@ def eval_train(epoch, model, eval_loader, criterion, num_batches, batch_size, st
             sys.stdout.write('| Evaluating loss Iter %3d\t' % (batch_idx))
             sys.stdout.flush()
 
-    losses = (losses - losses.min()) / (losses.max() - losses.min())
-    losses = losses.reshape(-1, 1)
+    losses_noisy = losses[:num_batches * batch_size]
+    losses = (losses - losses_noisy.min()) / (losses_noisy.max() - losses_noisy.min())
+    losses_noisy = losses[:num_batches * batch_size]
+    losses, losses_noisy = losses.reshape(-1, 1), losses_noisy.reshape(-1, 1)
     gmm = GaussianMixture(n_components=2, max_iter=100, reg_covar=5e-4, tol=1e-2)
-    gmm.fit(losses)
+    gmm.fit(losses_noisy)
 
     clean_idx, noisy_idx = gmm.means_.argmin(), gmm.means_.argmax()
     stats_log.write('GMM results: {} with variance {} and weight {}\t'
@@ -171,6 +173,7 @@ def main():
         create_model = create_model_selfsup
     else:
         raise ValueError()
+
     net1 = create_model(net='resnet50', num_class=args.num_class)
     net2 = create_model(net='resnet50', num_class=args.num_class)
     cudnn.benchmark = True
@@ -223,8 +226,8 @@ def main():
                   args.num_epochs, smooth_clean=True)  # train net2
 
         val_loader = loader.run('val')  # validation
-        acc1 = val(net1, val_loader, best_acc, 1,args.id, args.experiment_name)
-        acc2 = val(net2, val_loader, best_acc, 2,args.id, args.experiment_name)
+        acc1 = val(net1, val_loader, best_acc, 1, args.id, args.experiment_name)
+        acc2 = val(net2, val_loader, best_acc, 2, args.id, args.experiment_name)
         test_log.write('Validation Epoch:%d      Acc1:%.2f  Acc2:%.2f\n' % (epoch, acc1, acc2))
         test_log.flush()
         print('\n==== net 1 evaluate next epoch training data loss ====')
@@ -237,7 +240,7 @@ def main():
     test_loader = loader.run('test')
     net1.load_state_dict(torch.load('./checkpoint/%s_%s_net1.pth.tar' % (args.id, args.experiment_name)))
     net2.load_state_dict(torch.load('./checkpoint/%s_%s_net2.pth.tar' % (args.id, args.experiment_name)))
-    acc = test(net1, net2, test_loader)
+    acc = run_test(net1, net2, test_loader)
 
     test_log.write('Test Accuracy:%.2f\n' % (acc))
     test_log.flush()

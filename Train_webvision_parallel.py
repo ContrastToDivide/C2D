@@ -151,7 +151,7 @@ def warmup(epoch, net, optimizer, dataloader, device, whichnet):
         sys.stdout.flush()
 
 
-def test(epoch, net1, net2, test_loader, device, queue):
+def run_test(epoch, net1, net2, test_loader, device, queue):
     acc_meter = torchnet.meter.ClassErrorMeter(topk=[1, 5], accuracy=True)
     acc_meter.reset()
     net1.eval()
@@ -292,8 +292,8 @@ if __name__ == "__main__":
 
         q1 = mp.Queue()
         q2 = mp.Queue()
-        p1 = mp.Process(target=test, args=(epoch, net1, net2_clone, web_valloader, cuda1, q1))
-        p2 = mp.Process(target=test, args=(epoch, net1_clone, net2, imagenet_valloader, cuda2, q2))
+        p1 = mp.Process(target=run_test, args=(epoch, net1, net2_clone, web_valloader, cuda1, q1))
+        p2 = mp.Process(target=run_test, args=(epoch, net1_clone, net2, imagenet_valloader, cuda2, q2))
 
         p1.start()
         p2.start()

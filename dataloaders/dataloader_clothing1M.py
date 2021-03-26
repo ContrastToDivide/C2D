@@ -7,6 +7,18 @@ from PIL import Image
 from sklearn.metrics import roc_auc_score
 from torch.utils.data import Dataset, DataLoader
 
+def sample_traning_set(train_imgs, labels, num_class, num_samples):
+    random.shuffle(train_imgs)
+    class_num = torch.zeros(num_class)
+    sampled_train_imgs = []
+    for impath in train_imgs:
+        label = labels[impath]
+        if class_num[label] < (num_samples / num_class):
+            sampled_train_imgs.append(impath)
+            class_num[label] += 1
+        if len(sampled_train_imgs) >= num_samples:
+            break
+    return sampled_train_imgs
 
 class clothing_dataset(Dataset):
     def __init__(self, root, transform, mode, num_samples=0, pred=[], probability=[], paths=[], num_class=14,
@@ -41,14 +53,7 @@ class clothing_dataset(Dataset):
                 for l in lines:
                     img_path = '%s/' % self.root + l[7:]
                     train_imgs.append(img_path)
-            random.shuffle(train_imgs)  # 1M images, not including double-labeled
-            class_num = torch.zeros(num_class)
-            self.train_imgs = []
-            for impath in train_imgs:
-                label = self.noisy_labels[impath]
-                if class_num[label] < (num_samples / 14) and len(self.train_imgs) < num_samples:
-                    self.train_imgs.append(impath)
-                    class_num[label] += 1
+            self.train_imgs = sample_traning_set(train_imgs, self.noisy_labels, num_class, num_samples)
             random.shuffle(self.train_imgs)
             if add_clean:
                 inter_imgs = []
@@ -126,10 +131,11 @@ class clothing_dataset(Dataset):
         elif self.mode == 'all':
             img_path = self.train_imgs[index]
             target = self.noisy_labels[img_path] if not self.clean_all else self.clean_labels[img_path]
+            clean_target = self.clean_labels.get(img_path, -1)
             image = Image.open(img_path).convert('RGB')
             img1 = self.transform(image)
             img2 = self.transform(image)
-            return img1, img2, target, img_path, 0
+            return img1, img2, target, img_path, clean_target
         elif self.mode == 'test':
             img_path = self.test_imgs[index]
             target = self.clean_labels[img_path]
@@ -160,6 +166,20 @@ class clothing_dataloader():
         self.root = root
         self.log = log
 
+        mean = (0.485, 0.456, 0.406)  # (0.6959, 0.6537, 0.6371),
+        std = (0.229, 0.224, 0.225)  # (0.3113, 0.3192, 0.3214)
+        normalize = transforms.Normalize(mean=mean, std=std)
+
+        train_transform = transforms.Compose([
+            transforms.RandomResizedCrop(size=224, scale=(0.2, 1.)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomApply([
+                transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
+            ], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
+            transforms.ToTensor(),
+            normalize,
+        ])
         self.transform_warmup = transforms.Compose([
             transforms.Resize(256),
             transforms.RandomCrop(224),
@@ -170,20 +190,14 @@ class clothing_dataloader():
                                     scale=(2. / 3, 3. / 2),
                                     shear=(-0.1, 0.1, -0.1, 0.1)),
             transforms.ToTensor(),
-            transforms.Normalize((0.6959, 0.6537, 0.6371), (0.3113, 0.3192, 0.3214)),
+            transforms.Normalize(mean, std),
         ])
-        self.transform_train = transforms.Compose([
-            transforms.Resize(256),
-            transforms.RandomCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize((0.6959, 0.6537, 0.6371), (0.3113, 0.3192, 0.3214)),
-        ])
+        self.transform_train = train_transform
         self.transform_test = transforms.Compose([
             transforms.Resize(256),
             transforms.CenterCrop(224),
             transforms.ToTensor(),
-            transforms.Normalize((0.6959, 0.6537, 0.6371), (0.3113, 0.3192, 0.3214)),
+            transforms.Normalize(mean, std),
         ])
         self.transform_warmup = self.transform_warmup if stronger_aug else self.transform_train
         self.warmup_samples = self.num_batches * self.batch_size * 4 if stronger_aug else self.num_batches * self.batch_size * 2
